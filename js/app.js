@@ -16,6 +16,8 @@ const AppState = {
     refreshTimer: null
 };
 
+let selectedPhotos = [];
+
 // ==========================================
 // INITIALIZATION
 // ==========================================
@@ -899,38 +901,47 @@ function handlePengembalian(e) {
     const laptop = AppState.laptops.find(l => l.ID === peminjaman.LAPTOP_ID);
     const laptopName = laptop ? (laptop.MERK + ' ' + laptop.TYPE) : peminjaman.LAPTOP_ID;
 
-    // Store for processing
-    pendingPengembalianData = {
-        peminjamanId,
-        tglRealisasi,
-        kondisi,
-        catatan,
-        peminjaman, // Ref to object
-        laptopName
-    };
+    // Process photo first
+    let photoPromise = Promise.resolve('');
+    if (typeof selectedPhotos !== 'undefined' && selectedPhotos.length > 0 && (kondisi === 'Rusak Ringan' || kondisi === 'Rusak Berat')) {
+        photoPromise = getBase64(selectedPhotos[0]);
+    }
 
-    // Show Modal
-    const message = `
-        <div style="text-align: left; background: var(--bg-subtle); padding: 1rem; border-radius: var(--radius-md); font-size: 0.9rem;">
-            <div style="margin-bottom: 0.5rem;"><strong>Peminjam:</strong> ${escapeHtml(peminjaman.NAMA_PEMINJAM)}</div>
-            <div style="margin-bottom: 0.5rem;"><strong>Laptop:</strong> ${escapeHtml(laptopName)}</div>
-            <div style="margin-bottom: 0.5rem;"><strong>Tgl Realisasi:</strong> ${formatDate(tglRealisasi)}</div>
-            <div style="margin-bottom: 0.5rem;"><strong>Kondisi:</strong> ${escapeHtml(kondisi)}</div>
-            <div style="margin-bottom: 0.5rem;"><strong>Catatan:</strong> ${escapeHtml(catatan || '-')}</div>
-        </div>
-        <p style="margin-top: 1rem;">Pastikan laptop sudah dicek. Proses pengembalian?</p>
-    `;
+    photoPromise.then(function (base64Foto) {
+        // Store for confirmation
+        pendingPengembalianData = {
+            peminjamanId,
+            tglRealisasi,
+            kondisi,
+            catatan,
+            base64Foto,
+            peminjaman,
+            laptopName
+        };
 
-    showConfirmModal('Konfirmasi Pengembalian', message, processPengembalian);
+        // Show Modal
+        const message = `
+            <div style="text-align: left; background: var(--bg-subtle); padding: 1rem; border-radius: var(--radius-md); font-size: 0.9rem;">
+                <div style="margin-bottom: 0.5rem;"><strong>Peminjam:</strong> ${escapeHtml(peminjaman.NAMA_PEMINJAM)}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Laptop:</strong> ${escapeHtml(laptopName)}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Tgl Realisasi:</strong> ${formatDate(tglRealisasi)}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Kondisi:</strong> ${escapeHtml(kondisi)}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Catatan:</strong> ${escapeHtml(catatan || '-')}</div>
+                ${base64Foto ? '<div style="margin-bottom: 0.5rem;"><i class="fas fa-image"></i> Foto kerusakan terlampir</div>' : ''}
+            </div>
+            <p style="margin-top: 1rem;">Pastikan laptop sudah dicek. Proses pengembalian sekarang?</p>
+        `;
+
+        showConfirmModal('Konfirmasi Pengembalian', message, processPengembalian);
+    });
 }
 
 function processPengembalian() {
     if (!pendingPengembalianData) return;
+    const { peminjamanId, tglRealisasi, kondisi, catatan, base64Foto, peminjaman } = pendingPengembalianData;
     closeConfirmModal();
 
-    showLoading('Memproses pengembalian...');
-
-    const { peminjamanId, tglRealisasi, kondisi, catatan, peminjaman } = pendingPengembalianData;
+    showLoading('Menyinkronkan data ke spreadsheet...');
 
     // Create Data Pengembalian Row
     const returnRow = {
@@ -942,13 +953,13 @@ function processPengembalian() {
         TGL_KEMBALI_RENCANA: peminjaman.TGL_KEMBALI_RENCANA,
         TGL_REALISASI_PENGEMBALIAN: tglRealisasi,
 
-        // DUAL KEYS: Kirim kedua versi nama kolom agar cocok dengan spreadsheet lama & baru
+        // DUAL KEYS for compatibility
         KONDISI: kondisi,
         KONDISI_PENGEMBALIAN: kondisi,
-
         CATATAN: catatan,
         CATATAN_PENGEMBALIAN: catatan,
 
+        FOTO_KERUSAKAN: base64Foto || '',
         STATUS: 'Selesai'
     };
 
@@ -957,28 +968,25 @@ function processPengembalian() {
     if (kondisi === 'Rusak Ringan') newLaptopStatus = 'Rusak Ringan';
     if (kondisi === 'Rusak Berat') newLaptopStatus = 'Rusak Berat';
 
-    // 4. Send atomic request to Apps Script
-    // NOTE: Using native fetch to call GAS Web App directly with JSON payload
-    fetch(CONFIG.APPS_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            action: 'processReturn',
-            data: { // Wrap in data object to match common pattern if needed
-                returnRow: returnRow,
-                peminjamanId: peminjamanId,
-                tglRealisasi: tglRealisasi,
-                kondisi: kondisi,
-                laptopId: peminjaman.LAPTOP_ID,
-                newLaptopStatus: newLaptopStatus
-            }
-        })
-    })
+    // 1. Append to Data Pengembalian
+    appendToSheet('Data Pengembalian', returnRow)
         .then(function () {
-            // Success Local Update (Optimistic UI)
+            // 2. Update Data Peminjaman Status
+            return updateSheetRow('Data Peminjaman', 'ID', peminjamanId, {
+                STATUS: 'Selesai',
+                TGL_REALISASI_PENGEMBALIAN: tglRealisasi,
+                KONDISI_PENGEMBALIAN: kondisi
+            }).catch(e => {
+                console.warn('Loan record update failed (might be deleted):', e);
+                return { success: true };
+            });
+        })
+        .then(function () {
+            // 3. Update Data Laptop Status
+            return updateSheetRow('Data Laptop', 'ID', peminjaman.LAPTOP_ID, { STATUS: newLaptopStatus });
+        })
+        .then(function () {
+            // SUCCESS
             AppState.pengembalian.push(returnRow);
             peminjaman.STATUS = 'Selesai';
             peminjaman.TGL_REALISASI_PENGEMBALIAN = tglRealisasi;
@@ -987,31 +995,96 @@ function processPengembalian() {
             if (laptop) laptop.STATUS = newLaptopStatus;
 
             saveToLocalStorage();
-
             hideLoading();
             showToast('Pengembalian berhasil diproses!', 'success');
 
-            // Reset form sequence
-            document.getElementById('formPengembalian').reset();
-            document.getElementById('kembaliListCard').style.display = 'none';
-            document.getElementById('kembaliFormCard').style.display = 'none';
-
-            populatePengembalianForm();
-            renderDashboard();
+            // UI Update
             showPage('dashboard');
+            renderDashboard();
+            refreshData();
+
+            // Reset
+            if (typeof selectedPhotos !== 'undefined') selectedPhotos = [];
+            pendingPengembalianData = null;
         })
         .catch(function (err) {
             hideLoading();
-            console.error(err);
-            showToast('Gagal memproses pengembalian: ' + err.message, 'error');
+            console.error('Spreadsheet Sync Error:', err);
+            showToast('Sinkronisasi gagal, data disimpan secara lokal.', 'warning');
 
-            // Fallback: save locally
+            // Fallback Logic (so Riwayat still works)
             AppState.pengembalian.push(returnRow);
             peminjaman.STATUS = 'Selesai';
-            const laptop = AppState.laptops.find(function (l) { return l.ID === peminjaman.LAPTOP_ID; });
-            if (laptop) laptop.STATUS = newLaptopStatus;
+            const laptopIdx = AppState.laptops.findIndex(l => l.ID === peminjaman.LAPTOP_ID);
+            if (laptopIdx !== -1) AppState.laptops[laptopIdx].STATUS = newLaptopStatus;
+
             saveToLocalStorage();
+            showPage('dashboard');
+            renderDashboard();
+            pendingPengembalianData = null;
         });
+}
+
+// ==========================================
+// PHOTO HELPERS
+// ==========================================
+function toggleFotoKerusakan() {
+    const kondisi = document.getElementById('kembaliKondisi').value;
+    const group = document.getElementById('fotoKerusakanGroup');
+    if (!group) return;
+
+    if (kondisi === 'Rusak Ringan' || kondisi === 'Rusak Berat') {
+        showElement('fotoKerusakanGroup');
+    } else {
+        hideElement('fotoKerusakanGroup');
+        selectedPhotos = [];
+        const preview = document.getElementById('uploadPreview');
+        if (preview) preview.innerHTML = '';
+        const placeholder = document.getElementById('uploadPlaceholder');
+        if (placeholder) placeholder.classList.remove('hidden');
+    }
+}
+
+function previewFotoKerusakan(input) {
+    const preview = document.getElementById('uploadPreview');
+    const placeholder = document.getElementById('uploadPlaceholder');
+    if (!preview || !placeholder) return;
+
+    if (input.files) {
+        // Clear old selection if any (limit to 1 for simplicity in spreadsheet)
+        selectedPhotos = [input.files[0]];
+        preview.innerHTML = '';
+        placeholder.classList.add('hidden');
+
+        const file = input.files[0];
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const div = document.createElement('div');
+            div.className = 'preview-item';
+            div.innerHTML = `
+                <img src="${e.target.result}">
+                <button type="button" class="remove-btn" onclick="removeFoto(0)"><i class="fas fa-times"></i></button>
+            `;
+            preview.appendChild(div);
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function removeFoto(index) {
+    selectedPhotos = [];
+    document.getElementById('uploadPreview').innerHTML = '';
+    document.getElementById('uploadPlaceholder').classList.remove('hidden');
+    document.getElementById('fotoKerusakan').value = '';
+}
+
+function getBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
 }
 
 // ==========================================

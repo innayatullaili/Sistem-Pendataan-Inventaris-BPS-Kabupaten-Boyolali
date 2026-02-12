@@ -284,7 +284,7 @@
                             </div>
                             <div class="form-group">
                                 <label for="kembaliKondisi"><i class="fas fa-heartbeat"></i> Kondisi Laptop</label>
-                                <select id="kembaliKondisi" required>
+                                <select id="kembaliKondisi" required onchange="toggleFotoKerusakan()">
                                     <option value="Baik">Baik</option>
                                     <option value="Rusak Ringan">Rusak Ringan</option>
                                     <option value="Rusak Berat">Rusak Berat</option>
@@ -295,7 +295,22 @@
                                 <textarea id="kembaliCatatan" rows="2"
                                     placeholder="Catatan tambahan (opsional)"></textarea>
                             </div>
-                            <!-- Upload Foto Kerusakan Removed -->
+                            <!-- Upload Foto Kerusakan (muncul jika kondisi bukan Baik) -->
+                            <div class="form-group full-span" id="fotoKerusakanGroup" style="display:none;">
+                                <label><i class="fas fa-camera"></i> Foto Kerusakan <span
+                                        style="font-weight:400;color:var(--text-light);font-size:0.75rem;">(opsional)</span></label>
+                                <div class="upload-zone" id="uploadZone"
+                                    onclick="document.getElementById('fotoKerusakan').click()">
+                                    <input type="file" id="fotoKerusakan" accept="image/*" multiple
+                                        style="display:none;" onchange="previewFotoKerusakan(this)">
+                                    <div class="upload-placeholder" id="uploadPlaceholder">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <p>Klik atau seret foto ke sini</p>
+                                        <span>Format: JPG, PNG (maks 5MB per file)</span>
+                                    </div>
+                                    <div class="upload-preview" id="uploadPreview"></div>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-actions">
                             <button type="button" class="btn btn-secondary" onclick="cancelReturn()"><i
