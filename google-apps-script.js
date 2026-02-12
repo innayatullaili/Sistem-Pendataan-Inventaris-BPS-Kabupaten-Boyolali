@@ -297,7 +297,7 @@ function setupSheets() {
     createSheet(ss, 'Data Pengembalian', [
         'ID', 'PEMINJAMAN_ID', 'LAPTOP_ID', 'NAMA_PEMINJAM',
         'TGL_PINJAM', 'TGL_KEMBALI_RENCANA',
-        'TGL_REALISASI_PENGEMBALIAN', 'KONDISI_PENGEMBALIAN', 'CATATAN_PENGEMBALIAN', 'FOTO_KERUSAKAN', 'STATUS'
+        'TGL_REALISASI_PENGEMBALIAN', 'KONDISI_PENGEMBALIAN', 'CATATAN_PENGEMBALIAN', 'STATUS'
     ]);
 
     return 'Setup complete!';

@@ -16,8 +16,6 @@ const AppState = {
     refreshTimer: null
 };
 
-let selectedPhotos = [];
-
 // ==========================================
 // INITIALIZATION
 // ==========================================
@@ -27,6 +25,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // Hash navigation on load
     var hash = window.location.hash.replace('#', '');
     if (hash && hash !== 'dashboard') showPage(hash);
+
+    // Proactive load
+    showLoading('Menyinkronkan data...');
     loadData();
 });
 
@@ -162,8 +163,9 @@ function loadData(silent) {
         });
 }
 
-function refreshData() {
-    loadData(false);
+function refreshData(silent) {
+    if (!silent) showLoading('Menyegarkan data...');
+    return loadData(silent);
 }
 
 function startAutoRefresh() {
@@ -901,44 +903,33 @@ function handlePengembalian(e) {
     const laptop = AppState.laptops.find(l => l.ID === peminjaman.LAPTOP_ID);
     const laptopName = laptop ? (laptop.MERK + ' ' + laptop.TYPE) : peminjaman.LAPTOP_ID;
 
-    // Process photo first
-    let photoPromise = Promise.resolve('');
-    if (typeof selectedPhotos !== 'undefined' && selectedPhotos.length > 0 && (kondisi === 'Rusak Ringan' || kondisi === 'Rusak Berat')) {
-        photoPromise = getBase64(selectedPhotos[0]);
-    }
+    // Store for confirmation
+    pendingPengembalianData = {
+        peminjamanId,
+        tglRealisasi,
+        kondisi,
+        catatan,
+        peminjaman,
+        laptopName
+    };
 
-    photoPromise.then(function (base64Foto) {
-        // Store for confirmation
-        pendingPengembalianData = {
-            peminjamanId,
-            tglRealisasi,
-            kondisi,
-            catatan,
-            base64Foto,
-            peminjaman,
-            laptopName
-        };
+    // Show Modal
+    const message = `
+        <div style="text-align: left; background: var(--bg-subtle); padding: 1rem; border-radius: var(--radius-md); font-size: 0.9rem;">
+            <div style="margin-bottom: 0.5rem;"><strong>Peminjam:</strong> ${escapeHtml(peminjaman.NAMA_PEMINJAM)}</div>
+            <div style="margin-bottom: 0.5rem;"><strong>Laptop:</strong> ${escapeHtml(laptopName)}</div>
+            <div style="margin-bottom: 0.5rem;"><strong>Tgl Realisasi:</strong> ${formatDate(tglRealisasi)}</div>
+            <div style="margin-bottom: 0.5rem;"><strong>Kondisi:</strong> ${escapeHtml(kondisi)}</div>
+            <div style="margin-bottom: 0.5rem;"><strong>Catatan:</strong> ${escapeHtml(catatan || '-')}</div>
+        </div>
+        <p style="margin-top: 1rem;">Pastikan laptop sudah dicek. Proses pengembalian sekarang?</p>
+    `;
 
-        // Show Modal
-        const message = `
-            <div style="text-align: left; background: var(--bg-subtle); padding: 1rem; border-radius: var(--radius-md); font-size: 0.9rem;">
-                <div style="margin-bottom: 0.5rem;"><strong>Peminjam:</strong> ${escapeHtml(peminjaman.NAMA_PEMINJAM)}</div>
-                <div style="margin-bottom: 0.5rem;"><strong>Laptop:</strong> ${escapeHtml(laptopName)}</div>
-                <div style="margin-bottom: 0.5rem;"><strong>Tgl Realisasi:</strong> ${formatDate(tglRealisasi)}</div>
-                <div style="margin-bottom: 0.5rem;"><strong>Kondisi:</strong> ${escapeHtml(kondisi)}</div>
-                <div style="margin-bottom: 0.5rem;"><strong>Catatan:</strong> ${escapeHtml(catatan || '-')}</div>
-                ${base64Foto ? '<div style="margin-bottom: 0.5rem;"><i class="fas fa-image"></i> Foto kerusakan terlampir</div>' : ''}
-            </div>
-            <p style="margin-top: 1rem;">Pastikan laptop sudah dicek. Proses pengembalian sekarang?</p>
-        `;
-
-        showConfirmModal('Konfirmasi Pengembalian', message, processPengembalian);
-    });
+    showConfirmModal('Konfirmasi Pengembalian', message, processPengembalian);
 }
 
 function processPengembalian() {
-    if (!pendingPengembalianData) return;
-    const { peminjamanId, tglRealisasi, kondisi, catatan, base64Foto, peminjaman } = pendingPengembalianData;
+    const { peminjamanId, tglRealisasi, kondisi, catatan, peminjaman } = pendingPengembalianData;
     closeConfirmModal();
 
     showLoading('Menyinkronkan data ke spreadsheet...');
@@ -959,7 +950,6 @@ function processPengembalian() {
         CATATAN: catatan,
         CATATAN_PENGEMBALIAN: catatan,
 
-        FOTO_KERUSAKAN: base64Foto || '',
         STATUS: 'Selesai'
     };
 
@@ -1004,7 +994,6 @@ function processPengembalian() {
             refreshData();
 
             // Reset
-            if (typeof selectedPhotos !== 'undefined') selectedPhotos = [];
             pendingPengembalianData = null;
         })
         .catch(function (err) {
@@ -1023,68 +1012,6 @@ function processPengembalian() {
             renderDashboard();
             pendingPengembalianData = null;
         });
-}
-
-// ==========================================
-// PHOTO HELPERS
-// ==========================================
-function toggleFotoKerusakan() {
-    const kondisi = document.getElementById('kembaliKondisi').value;
-    const group = document.getElementById('fotoKerusakanGroup');
-    if (!group) return;
-
-    if (kondisi === 'Rusak Ringan' || kondisi === 'Rusak Berat') {
-        showElement('fotoKerusakanGroup');
-    } else {
-        hideElement('fotoKerusakanGroup');
-        selectedPhotos = [];
-        const preview = document.getElementById('uploadPreview');
-        if (preview) preview.innerHTML = '';
-        const placeholder = document.getElementById('uploadPlaceholder');
-        if (placeholder) placeholder.classList.remove('hidden');
-    }
-}
-
-function previewFotoKerusakan(input) {
-    const preview = document.getElementById('uploadPreview');
-    const placeholder = document.getElementById('uploadPlaceholder');
-    if (!preview || !placeholder) return;
-
-    if (input.files) {
-        // Clear old selection if any (limit to 1 for simplicity in spreadsheet)
-        selectedPhotos = [input.files[0]];
-        preview.innerHTML = '';
-        placeholder.classList.add('hidden');
-
-        const file = input.files[0];
-        const reader = new FileReader();
-        reader.onload = function (e) {
-            const div = document.createElement('div');
-            div.className = 'preview-item';
-            div.innerHTML = `
-                <img src="${e.target.result}">
-                <button type="button" class="remove-btn" onclick="removeFoto(0)"><i class="fas fa-times"></i></button>
-            `;
-            preview.appendChild(div);
-        };
-        reader.readAsDataURL(file);
-    }
-}
-
-function removeFoto(index) {
-    selectedPhotos = [];
-    document.getElementById('uploadPreview').innerHTML = '';
-    document.getElementById('uploadPlaceholder').classList.remove('hidden');
-    document.getElementById('fotoKerusakan').value = '';
-}
-
-function getBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = error => reject(error);
-    });
 }
 
 // ==========================================
