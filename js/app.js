@@ -109,7 +109,6 @@ function initForms() {
 function loadData(silent) {
     const url = CONFIG.APPS_SCRIPT_URL;
     if (!url) {
-        console.log('Apps Script URL not configured — using localStorage fallback');
         loadFromLocalStorage();
         updateSyncUI('offline');
         renderDashboard();
@@ -139,18 +138,11 @@ function loadData(silent) {
 
                 AppState.loaded = true;
                 updateSyncUI('connected');
-                console.log('Data loaded:', {
-                    laptops: AppState.laptops.length,
-                    pegawai: AppState.pegawai.length,
-                    peminjaman: AppState.peminjaman.length,
-                    pengembalian: AppState.pengembalian.length
-                });
             } else {
                 throw new Error('Invalid response');
             }
         })
         .catch(function (err) {
-            console.error('Load failed:', err);
             loadFromLocalStorage();
             updateSyncUI('offline');
             if (!silent) showToast('Gagal memuat dari server, menggunakan data lokal', 'warning');
@@ -174,7 +166,6 @@ function startAutoRefresh() {
 
     AppState.refreshTimer = setInterval(function () {
         if (!AppState.syncing) {
-            console.log('Auto-refresh...');
             loadData(true);
         }
     }, CONFIG.AUTO_REFRESH_MS);
@@ -186,7 +177,7 @@ function saveToLocalStorage() {
         localStorage.setItem('iv_pegawai', JSON.stringify(AppState.pegawai));
         localStorage.setItem('iv_peminjaman', JSON.stringify(AppState.peminjaman));
         localStorage.setItem('iv_pengembalian', JSON.stringify(AppState.pengembalian));
-    } catch (e) { console.error('localStorage save failed', e); }
+    } catch (e) { }
 }
 
 function loadFromLocalStorage() {
@@ -197,7 +188,6 @@ function loadFromLocalStorage() {
         AppState.pengembalian = JSON.parse(localStorage.getItem('iv_pengembalian') || '[]');
         AppState.loaded = true;
     } catch (e) {
-        console.error('localStorage load failed', e);
     }
 }
 
@@ -696,7 +686,6 @@ function processPeminjaman() {
             renderDashboard();
         })
         .catch(function (error) {
-            console.error('Peminjaman failed:', error);
             hideLoading();
             showToast('Gagal menyimpan peminjaman: ' + error.message, 'error');
         });
@@ -998,7 +987,6 @@ function processPengembalian() {
         })
         .catch(function (err) {
             hideLoading();
-            console.error('Spreadsheet Sync Error:', err);
             showToast('Sinkronisasi gagal, data disimpan secara lokal.', 'warning');
 
             // Fallback Logic (so Riwayat still works)
